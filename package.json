@@ -4,7 +4,7 @@
   },
   "description": "Agent-first, human-in-the-loop workflows for infrastructure maintenance.",
   "devDependencies": {
-    "ai-rulez": "5.7.0",
+    "ai-rulez": "5.10.0",
     "markdownlint-cli2": "0.24.0",
     "skills": "1.7.4"
   },
