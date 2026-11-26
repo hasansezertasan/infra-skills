@@ -114,6 +114,26 @@ $files
 FILES
 }
 
+# The leaf's backend declaration at a revision, comment- and whitespace-free, so
+# moving the same block between files compares equal and any retarget does not.
+# Prints nothing if a .tf.json declares a backend: that form is not compared.
+backend_declaration() {
+    git --no-optional-locks ls-tree -r --name-only "$1" -- "terraform/$leaf/" |
+    while IFS= read -r file; do
+        depth="${file#terraform/$leaf/}"
+        case "$depth" in
+            (*/*) continue ;;
+            (*.tf.json)
+                verdict=$(json_check "$(git --no-optional-locks show "$1:$file")" \
+                    "$LAYOUT_FILTER" "cannot structurally inspect $file at $1") || exit 2
+                [ "$verdict" = false ] || echo 'json-backend' ;;
+            (*.tf)
+                git --no-optional-locks show "$1:$file" | flatten_hcl |
+                    grep -oE 'backend[[:space:]]*"[^"]*"[[:space:]]*[{][^}]*[}]' || true ;;
+        esac
+    done | tr -d '[:space:]'
+}
+
 history=''
 revisions=$(git --no-optional-locks log --format=%H HEAD -- "terraform/$leaf/") || {
     cannot_verify 'cannot read backend history'
@@ -203,6 +223,13 @@ if printf '%s' "$transfers" | jq -e --arg leaf "$leaf" '.[$leaf].legacy == true'
         and $transfer.cutover_commit == $cutover
         and ($transfer.migration | type == "string" and test("\\Ahttps://[^[:space:]]+\\z"))
     ' >/dev/null || incomplete "legacy record for $leaf must name cutover_commit $cutover, the current backend_blob and a migration URL"
+    then_backend=$(backend_declaration "$cutover") || exit 2
+    now_backend=$(backend_declaration HEAD) || exit 2
+    case "$then_backend" in ''|*json-backend*)
+        incomplete "legacy record for $leaf needs an HCL backend block at cutover $cutover; record the frozen transfer" ;;
+    esac
+    [ "$then_backend" = "$now_backend" ] ||
+        incomplete "legacy record for $leaf: the backend changed after cutover $cutover; remove legacy and record the frozen transfer"
     [ $((now_epoch - cutover_epoch)) -ge $((legacy_min_age_days * 86400)) ] ||
         incomplete "legacy record for $leaf: cutover $cutover landed less than $legacy_min_age_days days ago; remove legacy and record the frozen transfer"
     echo "LEGACY state transfer for $leaf: cutover $cutover predates transfer evidence, not re-verified" >&2

@@ -1,6 +1,6 @@
 {
   "schema_version": "v1",
-  "source_hash": "blake3:4e8c5ab4772ecd8836306ee606420ddd45c944b7cf2cccf05b5d0095d6560d59",
+  "source_hash": "blake3:49486e5376e49f7263f95cb31db8ebea9788a841fe9e9e1d8487f7dd34b57ed9",
   "outputs": {
     ".agents/plugins/marketplace.json": {
       "content_hash": "blake3:c9f5887398d8719835af830222d1d2197f73e2a8864b2e1e24d347e2d75b6b36",
@@ -95,7 +95,7 @@
       "mode": "0644"
     },
     "skills/infra/references/checks/state-transfer.sh": {
-      "content_hash": "blake3:9716d276965592bde04a21d29695d3a96a8a0a1a14750375e362298d9cc380b6",
+      "content_hash": "blake3:d07fddc9aa8bfeb4fbd3064f67486eba7a26648e752aa641b08a196318a4bdfb",
       "mode": "0644"
     },
     "skills/infra/references/checks/status-check-context.sh": {
@@ -163,7 +163,7 @@
       "mode": "0644"
     },
     "skills/infra/references/docs/object-storage-state.md": {
-      "content_hash": "blake3:87d3c4d12ef48e4c73e66542b447803bd417112bf01748c240e9fc7768caea9b",
+      "content_hash": "blake3:f1d1b328421f84325ddc69ccd71a64896c945d53ae3bb05052f930a1eaa1d21b",
       "mode": "0644"
     },
     "skills/infra/references/docs/prune.md": {

@@ -248,3 +248,28 @@ class StateTransferTests(unittest.TestCase):
                 result = self.check_transfer()
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertNotIn('LEGACY', result.stderr)
+
+    def test_legacy_record_survives_moving_the_same_backend_block(self) -> None:
+        legacy = self.prepare_legacy_migration('2024-02-01T00:00:00Z')
+        versions = self.checkout / 'terraform/github/versions.tf'
+        versions.write_text('terraform { backend "gcs" { bucket = "acme-state" } }\n')
+        self.backend.unlink()
+        self.commit_files('2024-04-01T00:00:00Z')
+        versions.write_text('terraform {}\n')
+        self.backend.write_text('# moved here\nterraform {\n  backend "gcs" {\n    bucket = "acme-state"\n  }\n}\n')
+        self.commit_files()
+        legacy['backend_blob'] = self.execute_git('hash-object', str(self.backend))
+        self.environment['STATE_TRANSFERS'] = json.dumps({'github': legacy})
+        result = self.check_transfer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('LEGACY', result.stderr)
+
+    def test_legacy_record_cannot_cover_a_fresh_backend_retarget(self) -> None:
+        legacy = self.prepare_legacy_migration('2024-02-01T00:00:00Z')
+        self.backend.write_text('terraform { backend "gcs" { bucket = "another-state" } }\n')
+        self.commit_files()
+        legacy['backend_blob'] = self.execute_git('hash-object', str(self.backend))
+        self.environment['STATE_TRANSFERS'] = json.dumps({'github': legacy})
+        result = self.check_transfer()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('backend changed after cutover', result.stderr)

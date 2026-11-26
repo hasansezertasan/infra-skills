@@ -407,7 +407,9 @@ the branch, not from the dates of the commits inside it. `cutover_commit` must m
 it; that is a pointer for readers, not proof. The gate is age: the record is accepted
 only once the cutover is at least 30 days old, so a fresh cutover cannot take this
 path. A committer date can still be forged by anyone who pushes directly, so this stops
-accidents and fresh migrations, not a determined admin. The check still binds the
+accidents and fresh migrations, not a determined admin. The backend block itself must
+be the one in place at the cutover: moving it between files is fine, but any retarget
+after the cutover needs the full frozen-transfer record. The check still binds the
 reviewed `backend.tf` and enforces the same single-backend layout. A passing legacy
 record reports `LEGACY state transfer`: the move is recorded, not re-verified.
 

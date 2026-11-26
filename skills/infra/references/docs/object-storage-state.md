@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:87d3c4d12ef48e4c73e66542b447803bd417112bf01748c240e9fc7768caea9b
-Source-Hash: blake3:4e8c5ab4772ecd8836306ee606420ddd45c944b7cf2cccf05b5d0095d6560d59
+Content-Hash: blake3:f1d1b328421f84325ddc69ccd71a64896c945d53ae3bb05052f930a1eaa1d21b
+Source-Hash: blake3:49486e5376e49f7263f95cb31db8ebea9788a841fe9e9e1d8487f7dd34b57ed9
 Schema-Version: v1
 -->
 
@@ -414,7 +414,9 @@ the branch, not from the dates of the commits inside it. `cutover_commit` must m
 it; that is a pointer for readers, not proof. The gate is age: the record is accepted
 only once the cutover is at least 30 days old, so a fresh cutover cannot take this
 path. A committer date can still be forged by anyone who pushes directly, so this stops
-accidents and fresh migrations, not a determined admin. The check still binds the
+accidents and fresh migrations, not a determined admin. The backend block itself must
+be the one in place at the cutover: moving it between files is fine, but any retarget
+after the cutover needs the full frozen-transfer record. The check still binds the
 reviewed `backend.tf` and enforces the same single-backend layout. A passing legacy
 record reports `LEGACY state transfer`: the move is recorded, not re-verified.
 
