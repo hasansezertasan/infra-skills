@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:4887cafe7ab746dc9d1c2e5ae1f7d67d13a77ed6e7a6e72ffc00f3a23dd6a839
-Source-Hash: blake3:68a46b64e70180566a5d1ebf9d0d4a9e0e15ab0076377348ec74a1267ef0ecb1
+Content-Hash: blake3:3fd3cde391f7a78bc2f1586e3f6ef6ed8a78c25aab42c3ed685f24a0128a2679
+Source-Hash: blake3:ed33cdd69c26dd72ca4d8282f7eac68ceaa335929b2935c031e3a43d3c418964
 Schema-Version: v1
 -->
 
@@ -392,6 +392,27 @@ that reviewed `backend.tf`, with no backend or cloud declarations in other
 could change the effective destination without changing the reviewed file.
 Preserve the original transfer evidence after subsequent legitimate applies advance state. Never
 record credential values or state contents in this public record.
+
+#### Legacy cutovers
+
+A cutover made before this record existed may have nothing left to attest: the HCP
+workspace is deleted and the frozen snapshot is gone. Never reconstruct those values.
+Record the cutover by its commit instead:
+
+```yaml
+state_transfers:
+  gcp:
+    legacy: true
+    cutover_commit: "<full SHA of the first commit after the leaf left HCP>"
+    migration: "https://github.com/<org>/<repo>/issues/<n>"
+    backend_blob: "<git hash-object terraform/gcp/backend.tf>"
+```
+
+The check derives the cutover commit from history and accepts the record only when it
+matches and that commit is at least 30 days old, so a fresh cutover cannot take this
+path. It still binds the reviewed `backend.tf` and enforces the same single-backend
+layout. A passing legacy record reports `LEGACY state transfer`: the move is recorded,
+not re-verified.
 
 ### Disconnect HCP and retire credentials
 

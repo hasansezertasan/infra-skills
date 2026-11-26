@@ -99,7 +99,7 @@ config; direct the user to add the field or run `infra-setup` to record their ch
 ```yaml
 backend: object-storage        # required: hcp | object-storage; recommended for new repos
 leaf_backends: {}               # optional map: leaf name -> hcp | object-storage
-state_transfers: {}             # public HUMAN cutover evidence, keyed by migrated leaf
+state_transfers: {}             # public HUMAN cutover evidence, keyed by migrated leaf (legacy form: docs/object-storage-state.md)
 github_apps:                    # handoff evidence when github uses Actions
   plan_app_id: ""               # public numeric ID, distinct from apply
   apply_app_id: ""

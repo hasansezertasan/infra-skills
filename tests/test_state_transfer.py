@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -29,10 +30,26 @@ class StateTransferTests(unittest.TestCase):
                                 text=True, check=True)
         return result.stdout.strip()
 
-    def commit_files(self) -> None:
+    def commit_files(self, date: str | None = None) -> None:
         self.execute_git('add', 'terraform', 'README.md')
-        self.execute_git('-c', 'user.name=Test', '-c', 'user.email=test@example.com',
-                         'commit', '-qm', 'cutover fixture')
+        environment = dict(os.environ)
+        if date is not None:
+            environment.update(GIT_AUTHOR_DATE=date, GIT_COMMITTER_DATE=date)
+        subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.com',
+                        'commit', '-qm', 'cutover fixture'], cwd=self.checkout, env=environment,
+                       capture_output=True, text=True, check=True)
+
+    def prepare_legacy_migration(self, cutover_date: str) -> dict[str, object]:
+        self.backend.write_text('terraform { cloud { organization = "acme" } }\n')
+        self.commit_files('2024-01-01T00:00:00Z')
+        self.backend.write_text('terraform { backend "gcs" { bucket = "acme-state" } }\n')
+        self.commit_files(cutover_date)
+        cutover = self.execute_git('rev-parse', 'HEAD')
+        (self.checkout / 'terraform/github/main.tf').write_text('locals {}\n')
+        self.commit_files()
+        return {'legacy': True, 'cutover_commit': cutover,
+                'migration': 'https://github.com/acme/infra/issues/1',
+                'backend_blob': self.execute_git('hash-object', str(self.backend))}
 
     def check_transfer(self) -> subprocess.CompletedProcess[str]:
         return subprocess.run(['sh', str(REFERENCES / 'checks/state-transfer.sh'), 'github'],
@@ -164,3 +181,43 @@ class StateTransferTests(unittest.TestCase):
         transfer['backend_blob'] = self.execute_git('hash-object', str(self.backend))
         self.environment['STATE_TRANSFERS'] = json.dumps({'github': transfer})
         self.assertEqual(self.check_transfer().returncode, 0)
+
+    def test_old_cutover_passes_with_a_legacy_record(self) -> None:
+        legacy = self.prepare_legacy_migration('2024-02-01T00:00:00Z')
+        self.environment['STATE_TRANSFERS'] = json.dumps({'github': legacy})
+        result = self.check_transfer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('LEGACY state transfer for github', result.stderr)
+
+    def test_legacy_record_cannot_skip_evidence_for_a_fresh_cutover(self) -> None:
+        now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        legacy = self.prepare_legacy_migration(now)
+        self.environment['STATE_TRANSFERS'] = json.dumps({'github': legacy})
+        result = self.check_transfer()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('younger than 30 days', result.stderr)
+
+    def test_legacy_record_must_match_history_backend_and_migration(self) -> None:
+        legacy = self.prepare_legacy_migration('2024-02-01T00:00:00Z')
+        hcp_commit = self.execute_git('rev-list', '--max-parents=0', 'HEAD')
+        for invalid_fields in ({'cutover_commit': hcp_commit}, {'cutover_commit': 'HEAD'},
+                               {'backend_blob': 'old-backend'}, {'migration': ''},
+                               {'migration': 'not a url'}):
+            with self.subTest(fields=invalid_fields):
+                self.environment['STATE_TRANSFERS'] = json.dumps({'github': {**legacy, **invalid_fields}})
+                result = self.check_transfer()
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertNotIn('LEGACY', result.stderr)
+
+    def test_legacy_record_cannot_cover_a_leaf_still_on_hcp(self) -> None:
+        self.backend.write_text('terraform { backend "gcs" { bucket = "acme-state" } }\n')
+        self.commit_files('2024-01-01T00:00:00Z')
+        self.backend.write_text('terraform { cloud { organization = "acme" } }\n')
+        self.commit_files('2024-02-01T00:00:00Z')
+        self.environment['STATE_TRANSFERS'] = json.dumps({'github': {
+            'legacy': True, 'cutover_commit': self.execute_git('rev-list', '--max-parents=0', 'HEAD'),
+            'migration': 'https://github.com/acme/infra/issues/1',
+            'backend_blob': self.execute_git('hash-object', str(self.backend))}})
+        result = self.check_transfer()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertNotIn('LEGACY', result.stderr)
