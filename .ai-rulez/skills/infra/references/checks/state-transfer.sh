@@ -128,10 +128,65 @@ backend_declaration() {
                     "$LAYOUT_FILTER" "cannot structurally inspect $file at $1") || exit 2
                 [ "$verdict" = false ] || echo 'json-backend' ;;
             (*.tf)
-                git --no-optional-locks show "$1:$file" | flatten_hcl |
-                    grep -oE 'backend[[:space:]]*"[^"]*"[[:space:]]*[{][^}]*[}]' || true ;;
+                snapshot=$(git --no-optional-locks show "$1:$file") || exit 2
+                # Cheap pre-filter: only a file with a backend label can hold one.
+                printf '%s\n' "$snapshot" | LC_ALL=C grep -Eq 'backend[[:space:]]*"' || continue
+                printf '%s\n' "$snapshot" | backend_blocks ;;
         esac
-    done | tr -d '[:space:]'
+    done
+}
+
+# Print each `backend "<type>" { ... }` block of one HCL file on its own line.
+# String-aware, unlike flatten_hcl: `//`, `#` and braces inside quoted strings
+# (an https endpoint, say) are kept, comments outside strings are dropped, and
+# nested blocks are matched to the real closing brace. Whitespace outside
+# strings is removed, so the same block compares equal wherever it lives.
+backend_blocks() {
+    LC_ALL=C awk '
+        { text = text $0 "\n" }
+        END {
+            n = length(text); out = ""; i = 1
+            while (i <= n) {
+                c = substr(text, i, 1); two = substr(text, i, 2)
+                if (c == "\"") {
+                    j = i + 1
+                    while (j <= n) {
+                        d = substr(text, j, 1)
+                        if (d == "\\") { j += 2; continue }
+                        if (d == "\"" || d == "\n") break
+                        j++
+                    }
+                    out = out substr(text, i, j - i + 1); i = j + 1; continue
+                }
+                if (c == "#" || two == "//") { while (i <= n && substr(text, i, 1) != "\n") i++; continue }
+                if (two == "/*") { j = index(substr(text, i + 2), "*/"); i = (j ? i + j + 3 : n + 1); continue }
+                if (c ~ /[[:space:]]/) { if (out ~ /[A-Za-z0-9_]$/) pending = 1; i++; continue }
+                if (pending && c ~ /[A-Za-z0-9_]/) out = out " "
+                pending = 0; out = out c; i++
+            }
+            m = length(out); k = 1
+            while (k <= m) {
+                c = substr(out, k, 1)
+                if (c == "\"") {
+                    k++
+                    while (k <= m && substr(out, k, 1) != "\"") k += (substr(out, k, 1) == "\\") ? 2 : 1
+                    k++; continue
+                }
+                if (substr(out, k, 8) == "backend\"" && (k == 1 || substr(out, k - 1, 1) !~ /[A-Za-z0-9_]/)) {
+                    start = k; depth = 0; k += 7; instr = 0
+                    while (k <= m) {
+                        c = substr(out, k, 1)
+                        if (instr) { if (c == "\\") k++; else if (c == "\"") instr = 0 }
+                        else if (c == "\"") instr = 1
+                        else if (c == "{") depth++
+                        else if (c == "}") { depth--; if (depth == 0) break }
+                        k++
+                    }
+                    print substr(out, start, k - start + 1)
+                }
+                k++
+            }
+        }'
 }
 
 history=''
