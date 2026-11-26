@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:3fd3cde391f7a78bc2f1586e3f6ef6ed8a78c25aab42c3ed685f24a0128a2679
-Source-Hash: blake3:ed33cdd69c26dd72ca4d8282f7eac68ceaa335929b2935c031e3a43d3c418964
+Content-Hash: blake3:87d3c4d12ef48e4c73e66542b447803bd417112bf01748c240e9fc7768caea9b
+Source-Hash: blake3:4e8c5ab4772ecd8836306ee606420ddd45c944b7cf2cccf05b5d0095d6560d59
 Schema-Version: v1
 -->
 
@@ -408,11 +408,15 @@ state_transfers:
     backend_blob: "<git hash-object terraform/gcp/backend.tf>"
 ```
 
-The check derives the cutover commit from history and accepts the record only when it
-matches and that commit is at least 30 days old, so a fresh cutover cannot take this
-path. It still binds the reviewed `backend.tf` and enforces the same single-backend
-layout. A passing legacy record reports `LEGACY state transfer`: the move is recorded,
-not re-verified.
+The check derives the cutover itself: the first commit on `HEAD`'s first-parent line
+after the leaf's last HCP revision, so a merge or squash counts from when it landed on
+the branch, not from the dates of the commits inside it. `cutover_commit` must match
+it; that is a pointer for readers, not proof. The gate is age: the record is accepted
+only once the cutover is at least 30 days old, so a fresh cutover cannot take this
+path. A committer date can still be forged by anyone who pushes directly, so this stops
+accidents and fresh migrations, not a determined admin. The check still binds the
+reviewed `backend.tf` and enforces the same single-backend layout. A passing legacy
+record reports `LEGACY state transfer`: the move is recorded, not re-verified.
 
 ### Disconnect HCP and retire credentials
 

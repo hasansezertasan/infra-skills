@@ -195,14 +195,16 @@ class StateTransferTests(unittest.TestCase):
         self.environment['STATE_TRANSFERS'] = json.dumps({'github': legacy})
         result = self.check_transfer()
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn('younger than 30 days', result.stderr)
+        self.assertIn('landed less than 30 days ago', result.stderr)
 
     def test_legacy_record_must_match_history_backend_and_migration(self) -> None:
         legacy = self.prepare_legacy_migration('2024-02-01T00:00:00Z')
         hcp_commit = self.execute_git('rev-list', '--max-parents=0', 'HEAD')
         for invalid_fields in ({'cutover_commit': hcp_commit}, {'cutover_commit': 'HEAD'},
                                {'backend_blob': 'old-backend'}, {'migration': ''},
-                               {'migration': 'not a url'}):
+                               {'migration': 'not a url'},
+                               {'migration': 'https://github.com/acme/infra/issues/1\n'},
+                               {'legacy': 'true'}):
             with self.subTest(fields=invalid_fields):
                 self.environment['STATE_TRANSFERS'] = json.dumps({'github': {**legacy, **invalid_fields}})
                 result = self.check_transfer()
@@ -221,3 +223,28 @@ class StateTransferTests(unittest.TestCase):
         result = self.check_transfer()
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertNotIn('LEGACY', result.stderr)
+
+    def test_backdated_branch_merged_today_is_not_a_legacy_cutover(self) -> None:
+        self.backend.write_text('terraform { cloud { organization = "acme" } }\n')
+        self.commit_files('2024-01-01T00:00:00Z')
+        main = self.execute_git('rev-parse', '--abbrev-ref', 'HEAD')
+        self.execute_git('switch', '-q', '-c', 'old-branch')
+        self.backend.write_text('terraform { backend "gcs" { bucket = "acme-state" } }\n')
+        self.commit_files('2024-02-01T00:00:00Z')
+        branch_commit = self.execute_git('rev-parse', 'HEAD')
+        self.execute_git('switch', '-q', main)
+        # main moves on outside the leaf, so the merge is TREESAME to the branch for
+        # this path and plain path-limited history would hide it.
+        (self.checkout / 'README.md').write_text('state_transfers: {}\nupdated: true\n')
+        self.commit_files('2024-03-01T00:00:00Z')
+        self.execute_git('-c', 'user.name=Test', '-c', 'user.email=test@example.com',
+                         'merge', '-q', '--no-ff', '-m', 'merge today', 'old-branch')
+        blob = self.execute_git('hash-object', str(self.backend))
+        for cutover in (branch_commit, self.execute_git('rev-parse', 'HEAD')):
+            with self.subTest(cutover=cutover):
+                self.environment['STATE_TRANSFERS'] = json.dumps({'github': {
+                    'legacy': True, 'cutover_commit': cutover, 'backend_blob': blob,
+                    'migration': 'https://github.com/acme/infra/issues/1'}})
+                result = self.check_transfer()
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertNotIn('LEGACY', result.stderr)

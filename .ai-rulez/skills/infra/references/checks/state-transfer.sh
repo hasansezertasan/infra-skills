@@ -115,18 +115,13 @@ FILES
 }
 
 history=''
-cutover=''
-newer=''
 revisions=$(git --no-optional-locks log --format=%H HEAD -- "terraform/$leaf/") || {
     cannot_verify 'cannot read backend history'
 }
-# Newest first: the revision seen just before the newest HCP-routed one is the
-# cutover, the first commit after it that left HCP.
 for revision in $revisions; do
     inspect_revision "$revision"
-    [ "$found" = false ] || { history=$revision; cutover=$newer; }
+    [ "$found" = false ] || history=$revision
     [ "$history" = '' ] || break
-    newer=$revision
 done
 if [ "$history" = '' ]; then
     shallow=$(git --no-optional-locks rev-parse --is-shallow-repository) || exit 2
@@ -180,22 +175,36 @@ transfers=${STATE_TRANSFERS-'{}'}
 
 # A cutover made before this evidence existed cannot be re-attested: the HCP
 # workspace and the frozen snapshot may be gone. A legacy record names the
-# cutover commit instead, which this check derives from history itself, and is
-# accepted only once that commit is legacy_min_age_days old, so a fresh cutover
-# can never use it to skip the frozen-transfer evidence.
+# cutover instead: the first-parent commit of HEAD that left HCP, so a merge or
+# squash counts from when it landed, not from its branch commits' own dates.
+# It is accepted only once that commit is legacy_min_age_days old, so a fresh
+# cutover cannot use it to skip the frozen-transfer evidence. A committer date
+# is still forgeable by anyone who can push directly; this stops accidents and
+# fresh migrations, not a determined admin.
 legacy_min_age_days=30
 if printf '%s' "$transfers" | jq -e --arg leaf "$leaf" '.[$leaf].legacy == true' >/dev/null 2>&1; then
-    [ "$cutover" != '' ] || incomplete "legacy record for $leaf, but its newest backend revision is still HCP"
+    cutover=''
+    newer=''
+    mainline=$(git --no-optional-locks log --first-parent --format=%H HEAD -- "terraform/$leaf/") || {
+        cannot_verify 'cannot read first-parent backend history'
+    }
+    for revision in $mainline; do
+        inspect_revision "$revision"
+        [ "$found" = false ] || { cutover=$newer; break; }
+        newer=$revision
+    done
+    [ "$cutover" != '' ] ||
+        incomplete "legacy record for $leaf, but no first-parent commit of HEAD left HCP; remove legacy and record the frozen transfer"
     cutover_epoch=$(git --no-optional-locks log -1 --format=%ct "$cutover") || exit 2
     now_epoch=$(date +%s)
     printf '%s' "$transfers" | jq -e --arg leaf "$leaf" --arg blob "$blob" --arg cutover "$cutover" '
       .[$leaf] as $transfer
       | $transfer.backend_blob == $blob
         and $transfer.cutover_commit == $cutover
-        and ($transfer.migration | type == "string" and test("^https://[^[:space:]]+$"))
+        and ($transfer.migration | type == "string" and test("\\Ahttps://[^[:space:]]+\\z"))
     ' >/dev/null || incomplete "legacy record for $leaf must name cutover_commit $cutover, the current backend_blob and a migration URL"
     [ $((now_epoch - cutover_epoch)) -ge $((legacy_min_age_days * 86400)) ] ||
-        incomplete "legacy record for $leaf: cutover $cutover is younger than $legacy_min_age_days days; record the frozen transfer"
+        incomplete "legacy record for $leaf: cutover $cutover landed less than $legacy_min_age_days days ago; remove legacy and record the frozen transfer"
     echo "LEGACY state transfer for $leaf: cutover $cutover predates transfer evidence, not re-verified" >&2
     exit 0
 fi
