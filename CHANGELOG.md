@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/hasansezertasan/infra-skills/compare/v0.5.0...v0.6.0) (2026-11-27)
+
+
+### Features
+
+* **state-transfer:** accept a legacy record for a cutover that predates the evidence ([#178](https://github.com/hasansezertasan/infra-skills/issues/178)) ([ae2c445](https://github.com/hasansezertasan/infra-skills/commit/ae2c445798d749221ad311ae9c390c27208f6af7))
+
 ## [0.5.0](https://github.com/hasansezertasan/infra-skills/compare/v0.4.0...v0.5.0) (2026-10-24)
 
 
