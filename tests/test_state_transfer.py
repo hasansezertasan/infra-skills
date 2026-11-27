@@ -291,3 +291,31 @@ class StateTransferTests(unittest.TestCase):
         result = self.check_transfer()
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn('backend changed after cutover', result.stderr)
+
+    def legacy_record_for_backend(self, cutover_backend: str, current_backend: str) -> subprocess.CompletedProcess[str]:
+        self.backend.write_text('terraform { cloud { organization = "acme" } }\n')
+        self.commit_files('2024-01-01T00:00:00Z')
+        self.backend.write_text(cutover_backend)
+        self.commit_files('2024-02-01T00:00:00Z')
+        cutover = self.execute_git('rev-parse', 'HEAD')
+        self.backend.write_text(current_backend)
+        (self.checkout / 'terraform/github/main.tf').write_text('locals {}\n')
+        self.commit_files()
+        self.environment['STATE_TRANSFERS'] = json.dumps({'github': {
+            'legacy': True, 'cutover_commit': cutover,
+            'migration': 'https://github.com/acme/infra/issues/1',
+            'backend_blob': self.execute_git('hash-object', str(self.backend))}})
+        return self.check_transfer()
+
+    def test_legacy_record_refuses_a_heredoc_backend(self) -> None:
+        heredoc = ('terraform {\n  backend "s3" {\n    bucket = "state"\n'
+                   '    endpoints = { s3 = <<EOT\nhttps://account-a.r2.example.com\nEOT\n    }\n  }\n}\n')
+        result = self.legacy_record_for_backend(heredoc, heredoc.replace('account-a', 'account-b'))
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('no heredoc', result.stderr)
+
+    def test_legacy_record_accepts_a_comment_before_the_backend_label(self) -> None:
+        commented = 'terraform { backend /* note */ "gcs" { bucket = "acme-state" } }\n'
+        result = self.legacy_record_for_backend(commented, commented)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('LEGACY', result.stderr)

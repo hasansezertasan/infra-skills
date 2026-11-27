@@ -129,8 +129,10 @@ backend_declaration() {
                 [ "$verdict" = false ] || echo 'json-backend' ;;
             (*.tf)
                 snapshot=$(git --no-optional-locks show "$1:$file") || exit 2
-                # Cheap pre-filter: only a file with a backend label can hold one.
-                printf '%s\n' "$snapshot" | LC_ALL=C grep -Eq 'backend[[:space:]]*"' || continue
+                # Cheap pre-filter on the bare word, so a comment between `backend`
+                # and its label still reaches the extractor; backend_service does not.
+                printf '%s\n' "$snapshot" |
+                    LC_ALL=C grep -Eq '(^|[^A-Za-z0-9_])backend([^A-Za-z0-9_]|$)' || continue
                 printf '%s\n' "$snapshot" | backend_blocks ;;
         esac
     done
@@ -280,8 +282,10 @@ if printf '%s' "$transfers" | jq -e --arg leaf "$leaf" '.[$leaf].legacy == true'
     ' >/dev/null || incomplete "legacy record for $leaf must name cutover_commit $cutover, the current backend_blob and a migration URL"
     then_backend=$(backend_declaration "$cutover") || exit 2
     now_backend=$(backend_declaration HEAD) || exit 2
-    case "$then_backend" in ''|*json-backend*)
-        incomplete "legacy record for $leaf needs an HCL backend block at cutover $cutover; record the frozen transfer" ;;
+    # A heredoc is not parsed as a string, so `//` inside one would read as a
+    # comment; refuse rather than compare a block that may be truncated.
+    case "$then_backend$now_backend" in ''|*json-backend*|*'<<'*)
+        incomplete "legacy record for $leaf needs a plain HCL backend block (no heredoc) at cutover $cutover and now; record the frozen transfer" ;;
     esac
     [ "$then_backend" = "$now_backend" ] ||
         incomplete "legacy record for $leaf: the backend changed after cutover $cutover; remove legacy and record the frozen transfer"

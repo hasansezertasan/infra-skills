@@ -1,6 +1,6 @@
 {
   "schema_version": "v1",
-  "source_hash": "blake3:2469f1326f0951b8bdbd97377a9cf4b93479bad9cb49047755cc09e56d02318b",
+  "source_hash": "blake3:9a5503235108f42d72f3ec06a24392547f2f7bd79d69ada7f5dc19051aaab4cb",
   "outputs": {
     ".agents/plugins/marketplace.json": {
       "content_hash": "blake3:c9f5887398d8719835af830222d1d2197f73e2a8864b2e1e24d347e2d75b6b36",
@@ -95,7 +95,7 @@
       "mode": "0644"
     },
     "skills/infra/references/checks/state-transfer.sh": {
-      "content_hash": "blake3:a56120b3d46dc5155eddf3cfc1d84c627ddbe64d865488e56947a05bb3536bf1",
+      "content_hash": "blake3:9d412ef6c6f9525f2a7f2bc0867d6c634256b7dd0b00f227628d53eb7775ae57",
       "mode": "0644"
     },
     "skills/infra/references/checks/status-check-context.sh": {
