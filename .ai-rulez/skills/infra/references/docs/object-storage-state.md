@@ -386,6 +386,33 @@ could change the effective destination without changing the reviewed file.
 Preserve the original transfer evidence after subsequent legitimate applies advance state. Never
 record credential values or state contents in this public record.
 
+#### Legacy cutovers
+
+A cutover made before this record existed may have nothing left to attest: the HCP
+workspace is deleted and the frozen snapshot is gone. Never reconstruct those values.
+Record the cutover by its commit instead:
+
+```yaml
+state_transfers:
+  gcp:
+    legacy: true
+    cutover_commit: "<full SHA of the first commit after the leaf left HCP>"
+    migration: "https://github.com/<org>/<repo>/issues/<n>"
+    backend_blob: "<git hash-object terraform/gcp/backend.tf>"
+```
+
+The check derives the cutover itself: the first commit on `HEAD`'s first-parent line
+after the leaf's last HCP revision, so a merge or squash counts from when it landed on
+the branch, not from the dates of the commits inside it. `cutover_commit` must match
+it; that is a pointer for readers, not proof. The gate is age: the record is accepted
+only once the cutover is at least 30 days old, so a fresh cutover cannot take this
+path. A committer date can still be forged by anyone who pushes directly, so this stops
+accidents and fresh migrations, not a determined admin. The backend block itself must
+be the one in place at the cutover: moving it between files is fine, but any retarget
+after the cutover needs the full frozen-transfer record. The check still binds the
+reviewed `backend.tf` and enforces the same single-backend layout. A passing legacy
+record reports `LEGACY state transfer`: the move is recorded, not re-verified.
+
 ### Disconnect HCP and retire credentials
 
 Immediately after merge, keep the HCP workspace locked and remove its VCS connection: `PATCH /workspaces/:id` with this JSON:API body (see the [workspaces API](https://developer.hashicorp.com/terraform/cloud-docs/api-docs/workspaces#update-a-workspace)):

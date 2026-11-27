@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:a74eef0239ac5dd336a1ac939b7564014416be5cc391b32d583549f31b9e3d69
-Source-Hash: blake3:68a46b64e70180566a5d1ebf9d0d4a9e0e15ab0076377348ec74a1267ef0ecb1
+Content-Hash: blake3:f18771dfb9836d6e68ef774aae1c470fdaf4f715d51257efa4251280af6e8731
+Source-Hash: blake3:9a5503235108f42d72f3ec06a24392547f2f7bd79d69ada7f5dc19051aaab4cb
 Schema-Version: v1
 -->
 
@@ -106,7 +106,7 @@ config; direct the user to add the field or run `infra-setup` to record their ch
 ```yaml
 backend: object-storage        # required: hcp | object-storage; recommended for new repos
 leaf_backends: {}               # optional map: leaf name -> hcp | object-storage
-state_transfers: {}             # public HUMAN cutover evidence, keyed by migrated leaf
+state_transfers: {}             # public HUMAN cutover evidence, keyed by migrated leaf (legacy form: docs/object-storage-state.md)
 github_apps:                    # handoff evidence when github uses Actions
   plan_app_id: ""               # public numeric ID, distinct from apply
   apply_app_id: ""

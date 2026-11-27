@@ -114,6 +114,83 @@ $files
 FILES
 }
 
+# The leaf's backend declaration at a revision, comment- and whitespace-free, so
+# moving the same block between files compares equal and any retarget does not.
+# Prints nothing if a .tf.json declares a backend: that form is not compared.
+backend_declaration() {
+    git --no-optional-locks ls-tree -r --name-only "$1" -- "terraform/$leaf/" |
+    while IFS= read -r file; do
+        depth="${file#terraform/$leaf/}"
+        case "$depth" in
+            (*/*) continue ;;
+            (*.tf.json)
+                verdict=$(json_check "$(git --no-optional-locks show "$1:$file")" \
+                    "$LAYOUT_FILTER" "cannot structurally inspect $file at $1") || exit 2
+                [ "$verdict" = false ] || echo 'json-backend' ;;
+            (*.tf)
+                snapshot=$(git --no-optional-locks show "$1:$file") || exit 2
+                # Cheap pre-filter on the bare word, so a comment between `backend`
+                # and its label still reaches the extractor; backend_service does not.
+                printf '%s\n' "$snapshot" |
+                    LC_ALL=C grep -Eq '(^|[^A-Za-z0-9_])backend([^A-Za-z0-9_]|$)' || continue
+                printf '%s\n' "$snapshot" | backend_blocks ;;
+        esac
+    done
+}
+
+# Print each `backend "<type>" { ... }` block of one HCL file on its own line.
+# String-aware, unlike flatten_hcl: `//`, `#` and braces inside quoted strings
+# (an https endpoint, say) are kept, comments outside strings are dropped, and
+# nested blocks are matched to the real closing brace. Whitespace outside
+# strings is removed, so the same block compares equal wherever it lives.
+backend_blocks() {
+    LC_ALL=C awk '
+        { text = text $0 "\n" }
+        END {
+            n = length(text); out = ""; i = 1
+            while (i <= n) {
+                c = substr(text, i, 1); two = substr(text, i, 2)
+                if (c == "\"") {
+                    j = i + 1
+                    while (j <= n) {
+                        d = substr(text, j, 1)
+                        if (d == "\\") { j += 2; continue }
+                        if (d == "\"" || d == "\n") break
+                        j++
+                    }
+                    out = out substr(text, i, j - i + 1); i = j + 1; continue
+                }
+                if (c == "#" || two == "//") { while (i <= n && substr(text, i, 1) != "\n") i++; continue }
+                if (two == "/*") { j = index(substr(text, i + 2), "*/"); i = (j ? i + j + 3 : n + 1); continue }
+                if (c ~ /[[:space:]]/) { if (out ~ /[A-Za-z0-9_]$/) pending = 1; i++; continue }
+                if (pending && c ~ /[A-Za-z0-9_]/) out = out " "
+                pending = 0; out = out c; i++
+            }
+            m = length(out); k = 1
+            while (k <= m) {
+                c = substr(out, k, 1)
+                if (c == "\"") {
+                    k++
+                    while (k <= m && substr(out, k, 1) != "\"") k += (substr(out, k, 1) == "\\") ? 2 : 1
+                    k++; continue
+                }
+                if (substr(out, k, 8) == "backend\"" && (k == 1 || substr(out, k - 1, 1) !~ /[A-Za-z0-9_]/)) {
+                    start = k; depth = 0; k += 7; instr = 0
+                    while (k <= m) {
+                        c = substr(out, k, 1)
+                        if (instr) { if (c == "\\") k++; else if (c == "\"") instr = 0 }
+                        else if (c == "\"") instr = 1
+                        else if (c == "{") depth++
+                        else if (c == "}") { depth--; if (depth == 0) break }
+                        k++
+                    }
+                    print substr(out, start, k - start + 1)
+                }
+                k++
+            }
+        }'
+}
+
 history=''
 revisions=$(git --no-optional-locks log --format=%H HEAD -- "terraform/$leaf/") || {
     cannot_verify 'cannot read backend history'
@@ -172,6 +249,51 @@ git diff --quiet HEAD -- "$backend_file" README.md || exit 1
 git diff --cached --quiet HEAD -- "$backend_file" README.md || exit 1
 blob=$(git hash-object "$backend_file") || exit 2
 transfers=${STATE_TRANSFERS-'{}'}
+
+# A cutover made before this evidence existed cannot be re-attested: the HCP
+# workspace and the frozen snapshot may be gone. A legacy record names the
+# cutover instead: the first-parent commit of HEAD that left HCP, so a merge or
+# squash counts from when it landed, not from its branch commits' own dates.
+# It is accepted only once that commit is legacy_min_age_days old, so a fresh
+# cutover cannot use it to skip the frozen-transfer evidence. A committer date
+# is still forgeable by anyone who can push directly; this stops accidents and
+# fresh migrations, not a determined admin.
+legacy_min_age_days=30
+if printf '%s' "$transfers" | jq -e --arg leaf "$leaf" '.[$leaf].legacy == true' >/dev/null 2>&1; then
+    cutover=''
+    newer=''
+    mainline=$(git --no-optional-locks log --first-parent --format=%H HEAD -- "terraform/$leaf/") || {
+        cannot_verify 'cannot read first-parent backend history'
+    }
+    for revision in $mainline; do
+        inspect_revision "$revision"
+        [ "$found" = false ] || { cutover=$newer; break; }
+        newer=$revision
+    done
+    [ "$cutover" != '' ] ||
+        incomplete "legacy record for $leaf, but no first-parent commit of HEAD left HCP; remove legacy and record the frozen transfer"
+    cutover_epoch=$(git --no-optional-locks log -1 --format=%ct "$cutover") || exit 2
+    now_epoch=$(date +%s)
+    printf '%s' "$transfers" | jq -e --arg leaf "$leaf" --arg blob "$blob" --arg cutover "$cutover" '
+      .[$leaf] as $transfer
+      | $transfer.backend_blob == $blob
+        and $transfer.cutover_commit == $cutover
+        and ($transfer.migration | type == "string" and test("\\Ahttps://[^[:space:]]+\\z"))
+    ' >/dev/null || incomplete "legacy record for $leaf must name cutover_commit $cutover, the current backend_blob and a migration URL"
+    then_backend=$(backend_declaration "$cutover") || exit 2
+    now_backend=$(backend_declaration HEAD) || exit 2
+    # A heredoc is not parsed as a string, so `//` inside one would read as a
+    # comment; refuse rather than compare a block that may be truncated.
+    case "$then_backend$now_backend" in ''|*json-backend*|*'<<'*)
+        incomplete "legacy record for $leaf needs a plain HCL backend block (no heredoc) at cutover $cutover and now; record the frozen transfer" ;;
+    esac
+    [ "$then_backend" = "$now_backend" ] ||
+        incomplete "legacy record for $leaf: the backend changed after cutover $cutover; remove legacy and record the frozen transfer"
+    [ $((now_epoch - cutover_epoch)) -ge $((legacy_min_age_days * 86400)) ] ||
+        incomplete "legacy record for $leaf: cutover $cutover landed less than $legacy_min_age_days days ago; remove legacy and record the frozen transfer"
+    echo "LEGACY state transfer for $leaf: cutover $cutover predates transfer evidence, not re-verified" >&2
+    exit 0
+fi
 printf '%s' "$transfers" | jq -e --arg leaf "$leaf" --arg blob "$blob" '
   .[$leaf] as $transfer
   | ($transfer | type == "object")
